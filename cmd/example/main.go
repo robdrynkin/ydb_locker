@@ -67,27 +67,27 @@ func main() {
 		return
 	}
 	locker := ydb_locker.Locker{db, "lock1", "owner1", time.Second * 10, reqBuilder}
-	locker.RunInLockerThread(ctx, func(deadline time.Time) {
-		reqCtx, cancel := context.WithDeadline(ctx, deadline)
-		defer cancel()
 
-		err = db.Table().Do(reqCtx, func(ctx context.Context, s table.Session) error {
-			ok, txr, err := locker.CheckLockOwner(ctx, s)
+	for lockCtx := range locker.LockerContext(ctx) {
+		for lockCtx.Err() == nil {
+			err = db.Table().Do(lockCtx, func(ctx context.Context, s table.Session) error {
+				ok, txr, err := locker.CheckLockOwner(ctx, s)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					fmt.Println("lock is not owned by", locker.OwnerName)
+					return nil
+				}
+
+				return DoSomeUserStuff(ctx, s, txr)
+			})
+
 			if err != nil {
-				return err
+				log.Fatal("lock error", err)
+				return
 			}
-			if !ok {
-				fmt.Println("lock is not owned by", locker.OwnerName)
-				return nil
-			}
-
-			return DoSomeUserStuff(ctx, s, txr)
-		})
-
-		if err != nil {
-			log.Fatal("lock error", err)
-			return
 		}
-	})
+	}
 
 }

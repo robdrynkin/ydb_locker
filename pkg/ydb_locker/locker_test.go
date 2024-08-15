@@ -37,11 +37,14 @@ func TestRunInLockerThreadSingleWorker(t *testing.T) {
 	defer cancel()
 
 	cntr := 0
-	locker.RunInLockerThread(ctx10s, func(deadline time.Time) {
-		log.Println("deadline:", deadline)
-		cntr++
-		time.Sleep(time.Second * 1)
-	})
+
+	for lockCtx := range locker.LockerContext(ctx10s) {
+		for lockCtx.Err() == nil {
+			cntr++
+			log.Println("cntr:", cntr)
+			time.Sleep(time.Second * 1)
+		}
+	}
 
 	if cntr < 8 || cntr > 12 {
 		t.Errorf("expected 10, got %d", cntr)
@@ -70,16 +73,21 @@ func TestRunInLockerThreadMultipleWorkers(t *testing.T) {
 		go func() {
 			locker := Locker{db, lockName, uuid.New().String(), time.Second * 10, reqBuilder}
 			defer wg.Done()
-			locker.RunInLockerThread(ctx10s, func(deadline time.Time) {
-				log.Println("deadline:", deadline)
-				if curOwner == "" {
-					curOwner = locker.OwnerName
-				} else if curOwner != locker.OwnerName {
-					t.Errorf("expected %s, got %s", curOwner, locker.OwnerName)
+
+			lockCtxs := locker.LockerContext(ctx10s)
+
+			for lockCtx := range lockCtxs {
+				for lockCtx.Err() == nil {
+					log.Println("owner:", locker.OwnerName, "cntr:", cntr)
+					if curOwner == "" {
+						curOwner = locker.OwnerName
+					} else if curOwner != locker.OwnerName {
+						t.Errorf("expected %s, got %s", curOwner, locker.OwnerName)
+					}
+					cntr++
+					time.Sleep(time.Second * 1)
 				}
-				cntr++
-				time.Sleep(time.Second * 1)
-			})
+			}
 		}()
 	}
 	wg.Wait()

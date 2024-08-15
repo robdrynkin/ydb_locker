@@ -16,10 +16,10 @@ type Locker struct {
 	RequestBuilder LockRequestBuilder
 }
 
-func (l *Locker) RunInLockerThread(ctx context.Context, f func(deadline time.Time)) {
-	RunInLockerThread(ctx, l.Db, l.LockName, l.OwnerName, l.Ttl, l.RequestBuilder, f)
-}
-
 func (l *Locker) CheckLockOwner(ctx context.Context, s table.Session) (bool, table.Transaction, error) {
 	return CheckLockOwner(ctx, s, l.LockName, l.OwnerName, l.RequestBuilder)
+}
+
+func (l *Locker) LockerContext(ctx context.Context) chan context.Context {
+	return LockerContext(ctx, l.Db, l.LockName, l.OwnerName, l.Ttl, l.RequestBuilder)
 }
