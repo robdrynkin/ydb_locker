@@ -1,0 +1,32 @@
+# Ignore generated binaries -- any file without extension
+# Ignore all
+*
+# Unignore all with extensions
+!*.*
+# Unignore all dirs
+!*/
+
+# C libraries
+*.so
+*.a
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# MacOS specific
+.DS_Store
+
+# clangd cache
+/.cache
+
+/compile_commands.json
+
+/build_*
+/build-*
+
+.idea/
+.vscode/
+.clangd
+
