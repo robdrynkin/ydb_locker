@@ -19,6 +19,29 @@ func ConnectToDb(t *testing.T, ctx context.Context) *ydb.Driver {
 	return db
 }
 
+func TestLocalLockerCtxSingleWorker(t *testing.T) {
+	ctx := context.Background()
+	storage := NewLocalLockStorage()
+	locker := Locker{storage, "lock1", uuid.New().String(), time.Millisecond * 100}
+
+	ctx10s, cancel := context.WithTimeout(ctx, time.Second*1)
+	defer cancel()
+
+	cntr := 0
+
+	for lockCtx := range locker.LockerContext(ctx10s) {
+		for lockCtx.Err() == nil {
+			cntr++
+			log.Println("cntr:", cntr)
+			time.Sleep(time.Millisecond * 100)
+		}
+	}
+
+	if cntr < 8 || cntr > 12 {
+		t.Errorf("expected 10, got %d", cntr)
+	}
+}
+
 func TestRunInLockerThreadSingleWorker(t *testing.T) {
 	ctx := context.Background()
 	db := ConnectToDb(t, ctx)
@@ -31,7 +54,8 @@ func TestRunInLockerThreadSingleWorker(t *testing.T) {
 	if err := CreateLocksTable(ctx, db.Scripting(), &customReqBuilder); err != nil {
 		t.Errorf("create table error: %v", err)
 	}
-	locker := Locker{db, "lock1", uuid.New().String(), time.Second * 10, &customReqBuilder}
+	storage := YdbLockStorage{db, &customReqBuilder}
+	locker := Locker{&storage, "lock1", uuid.New().String(), time.Second * 10}
 
 	ctx10s, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
@@ -71,7 +95,8 @@ func TestRunInLockerThreadMultipleWorkers(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
-			locker := Locker{db, lockName, uuid.New().String(), time.Second * 10, reqBuilder}
+			storage := YdbLockStorage{db, reqBuilder}
+			locker := Locker{&storage, lockName, uuid.New().String(), time.Second * 10}
 			defer wg.Done()
 
 			lockCtxs := locker.LockerContext(ctx10s)

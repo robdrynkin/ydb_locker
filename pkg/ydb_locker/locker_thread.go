@@ -2,7 +2,6 @@ package ydb_locker
 
 import (
 	"context"
-	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"log"
 	"math/rand"
 	"sync"
@@ -10,8 +9,8 @@ import (
 	"time"
 )
 
-func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, db *ydb.Driver, lockName string, ownerName string, ttl time.Duration, reqBuilder LockRequestBuilder, events chan struct{}) {
-	created, err := CreateLock(ctx, db.Table(), lockName, reqBuilder)
+func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, events chan struct{}) {
+	created, err := lockStorage.CreateLock(ctx, lockName)
 	if err != nil {
 		log.Fatal("create lock error", err)
 		return
@@ -23,7 +22,7 @@ func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, db *ydb.Drive
 	isLockAcquired := false
 
 	for ctx.Err() == nil {
-		curOwner, curTimeout, err := TryLock(ctx, db.Table(), lockName, ownerName, ttl, reqBuilder)
+		curOwner, curTimeout, err := lockStorage.TryLock(ctx, lockName, ownerName, ttl)
 		if err == nil && curOwner == ownerName {
 			deadlineNano.Store(curTimeout.UnixNano())
 			if !isLockAcquired {
@@ -40,7 +39,7 @@ func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, db *ydb.Drive
 	}
 }
 
-func lockerContext(ctx context.Context, db *ydb.Driver, lockName string, ownerName string, ttl time.Duration, reqBuilder LockRequestBuilder, lockCtxs chan context.Context) {
+func lockerContext(ctx context.Context, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, lockCtxs chan context.Context) {
 	var masterDeadline atomic.Int64
 	masterDeadline.Store(0)
 	var wg sync.WaitGroup
@@ -50,7 +49,7 @@ func lockerContext(ctx context.Context, db *ydb.Driver, lockName string, ownerNa
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		LockerThread(ctx, &masterDeadline, db, lockName, ownerName, ttl, reqBuilder, lockAcquiringEvents)
+		LockerThread(ctx, &masterDeadline, lockStorage, lockName, ownerName, ttl, lockAcquiringEvents)
 	}()
 
 	nextProbExpireChan := make(<-chan time.Time)
@@ -84,12 +83,12 @@ func lockerContext(ctx context.Context, db *ydb.Driver, lockName string, ownerNa
 	}
 }
 
-func LockerContext(ctx context.Context, db *ydb.Driver, lockName string, ownerName string, ttl time.Duration, reqBuilder LockRequestBuilder) chan context.Context {
+func LockerContext(ctx context.Context, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration) chan context.Context {
 	lockCtxs := make(chan context.Context, 100)
 
 	go func() {
 		defer close(lockCtxs)
-		lockerContext(ctx, db, lockName, ownerName, ttl, reqBuilder, lockCtxs)
+		lockerContext(ctx, lockStorage, lockName, ownerName, ttl, lockCtxs)
 	}()
 
 	return lockCtxs

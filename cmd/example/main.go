@@ -4,13 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/robdrynkin/ydb_locker/pkg/ydb_locker"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/sugar"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/named"
 	"log"
 	"time"
-	"ydb_locker/pkg/ydb_locker"
 )
 
 func DoSomeUserStuff(ctx context.Context, s table.Session, txr table.Transaction) error {
@@ -66,7 +66,8 @@ func main() {
 		log.Fatal("create table error", err)
 		return
 	}
-	locker := ydb_locker.Locker{db, "lock1", "owner1", time.Second * 10, reqBuilder}
+	storage := ydb_locker.YdbLockStorage{Db: db, ReqBuilder: reqBuilder}
+	locker := ydb_locker.Locker{LockStorage: &storage, LockName: "lock1", OwnerName: "owner1", Ttl: time.Second * 10}
 
 	for lockCtx := range locker.LockerContext(ctx) {
 		for lockCtx.Err() == nil {
