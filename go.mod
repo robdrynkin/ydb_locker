@@ -1,4 +1,4 @@
-module ydb_locker
+module github.com/robdrynkin/ydb_locker
 
 go 1.22.0
 
