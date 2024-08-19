@@ -3,21 +3,11 @@ package ydb_locker
 import (
 	"context"
 	"github.com/google/uuid"
-	"github.com/ydb-platform/ydb-go-sdk/v3"
-	"github.com/ydb-platform/ydb-go-sdk/v3/sugar"
 	"log"
 	"sync"
 	"testing"
 	"time"
 )
-
-func ConnectToDb(t *testing.T, ctx context.Context) *ydb.Driver {
-	db, err := ydb.Open(ctx, sugar.DSN("localhost:2136", "local", false))
-	if err != nil {
-		t.Fatal("Db connection error", err)
-	}
-	return db
-}
 
 func TestLocalLockerCtxSingleWorker(t *testing.T) {
 	ctx := context.Background()
@@ -51,6 +41,7 @@ func TestRunInLockerThreadSingleWorker(t *testing.T) {
 		"owner_456",
 		"deadline_789",
 	}
+	DropTableIfExists(t, ctx, db.Scripting(), customReqBuilder.TableName)
 	if err := CreateLocksTable(ctx, db.Scripting(), &customReqBuilder); err != nil {
 		t.Errorf("create table error: %v", err)
 	}
@@ -81,6 +72,7 @@ func TestRunInLockerThreadMultipleWorkers(t *testing.T) {
 	reqBuilder := GetDefaultRequestBuilder("TestRunInLockerThreadMultipleWorkers")
 	lockName := "lock2"
 
+	DropTableIfExists(t, ctx, db.Scripting(), reqBuilder.TableName)
 	if err := CreateLocksTable(ctx, db.Scripting(), reqBuilder); err != nil {
 		t.Errorf("create table error: %v", err)
 	}

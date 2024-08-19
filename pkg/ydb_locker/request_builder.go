@@ -65,8 +65,8 @@ func (l *LockRequestBuilderImpl) GetUpdateLockQueryWithParams(lockName string, o
 			upsert into %[1]s
 			select
 				%[2]s,
-				if(%[3]s == $OWNER, %[3]s, if($ts > %[4]s, $OWNER, %[3]s)) as %[3]s,
-				if(%[3]s == $OWNER, $new_ts, if($ts > %[4]s, $new_ts, %[4]s)) as %[4]s
+				if(%[3]s == $OWNER, %[3]s, if($ts >= %[4]s ?? $ts, $OWNER, %[3]s)) as %[3]s,
+				if(%[3]s == $OWNER, $new_ts, if($ts >= %[4]s ?? $ts, $new_ts, %[4]s)) as %[4]s
 			from %[1]s
 			where %[2]s == $LOCK_NAME;
 
