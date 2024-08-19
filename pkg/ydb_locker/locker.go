@@ -11,12 +11,32 @@ type Locker struct {
 	LockName    string
 	OwnerName   string
 	Ttl         time.Duration
+
+	FuncsToRun chan func()
 }
 
-func (l *Locker) CheckLockOwner(ctx context.Context, s table.Session) (bool, table.Transaction, error) {
-	return l.LockStorage.CheckLockOwner(ctx, s, l.LockName, l.OwnerName)
+func NewLocker(lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration) *Locker {
+	return &Locker{
+		LockStorage: lockStorage,
+		LockName:    lockName,
+		OwnerName:   ownerName,
+		Ttl:         ttl,
+		FuncsToRun:  make(chan func(), 1000),
+	}
+}
+
+//func (l *Locker) CheckLockOwner(ctx context.Context, s table.Session) (bool, table.Transaction, error) {
+//	return l.LockStorage.CheckLockOwner(ctx, s, l.LockName, l.OwnerName)
+//}
+
+func (l *Locker) ExecuteUnderLock(ctx context.Context, f func(context.Context, table.Session, table.Transaction) error) error {
+	res := make(chan error, 1)
+	l.FuncsToRun <- func() {
+		res <- l.LockStorage.ExecuteUnderLock(ctx, l.LockName, l.OwnerName, f)
+	}
+	return <-res
 }
 
 func (l *Locker) LockerContext(ctx context.Context) chan context.Context {
-	return LockerContext(ctx, l.LockStorage, l.LockName, l.OwnerName, l.Ttl)
+	return LockerContext(ctx, l.LockStorage, l.LockName, l.OwnerName, l.Ttl, l.FuncsToRun)
 }

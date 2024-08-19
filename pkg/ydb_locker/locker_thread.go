@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, events chan struct{}) {
+func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, events chan struct{}, funcsToRun <-chan func()) {
 	created, err := lockStorage.CreateLock(ctx, lockName)
 	if err != nil {
 		log.Fatal("create lock error", err)
@@ -20,26 +20,37 @@ func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, lockStorage L
 	}
 
 	isLockAcquired := false
+	nextLockUpdateChan := time.After(0)
 
-	for ctx.Err() == nil {
-		curOwner, curTimeout, err := lockStorage.TryLock(ctx, lockName, ownerName, ttl)
-		if err == nil && curOwner == ownerName {
-			deadlineNano.Store(curTimeout.UnixNano())
-			if !isLockAcquired {
-				events <- struct{}{}
-				isLockAcquired = true
+	for {
+		select {
+		case <-nextLockUpdateChan:
+			curOwner, curTimeout, err := lockStorage.TryLock(ctx, lockName, ownerName, ttl)
+			if err == nil && curOwner == ownerName {
+				deadlineNano.Store(curTimeout.UnixNano())
+				if !isLockAcquired {
+					events <- struct{}{}
+					isLockAcquired = true
+				}
+			} else {
+				isLockAcquired = false
 			}
-		} else {
-			isLockAcquired = false
+			if err != nil {
+				log.Println(err)
+			}
+			ch := time.After(ttl/10 + time.Duration(rand.Int63n(int64(ttl/10))))
+			nextLockUpdateChan = ch
+
+		case fn := <-funcsToRun:
+			fn()
+
+		case <-ctx.Done():
+			return
 		}
-		if err != nil {
-			log.Println(err)
-		}
-		time.Sleep(ttl/10 + time.Duration(rand.Int63n(int64(ttl/10))))
 	}
 }
 
-func lockerContext(ctx context.Context, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, lockCtxs chan context.Context) {
+func lockerContext(ctx context.Context, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, lockCtxs chan context.Context, funcsToRun <-chan func()) {
 	var masterDeadline atomic.Int64
 	masterDeadline.Store(0)
 	var wg sync.WaitGroup
@@ -49,7 +60,7 @@ func lockerContext(ctx context.Context, lockStorage LockStorage, lockName string
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		LockerThread(ctx, &masterDeadline, lockStorage, lockName, ownerName, ttl, lockAcquiringEvents)
+		LockerThread(ctx, &masterDeadline, lockStorage, lockName, ownerName, ttl, lockAcquiringEvents, funcsToRun)
 	}()
 
 	nextProbExpireChan := make(<-chan time.Time)
@@ -83,12 +94,12 @@ func lockerContext(ctx context.Context, lockStorage LockStorage, lockName string
 	}
 }
 
-func LockerContext(ctx context.Context, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration) chan context.Context {
+func LockerContext(ctx context.Context, lockStorage LockStorage, lockName string, ownerName string, ttl time.Duration, funcsToRun <-chan func()) chan context.Context {
 	lockCtxs := make(chan context.Context, 100)
 
 	go func() {
 		defer close(lockCtxs)
-		lockerContext(ctx, lockStorage, lockName, ownerName, ttl, lockCtxs)
+		lockerContext(ctx, lockStorage, lockName, ownerName, ttl, lockCtxs, funcsToRun)
 	}()
 
 	return lockCtxs

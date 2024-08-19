@@ -3,6 +3,7 @@ package ydb_locker
 import (
 	"context"
 	"github.com/google/uuid"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"log"
 	"sync"
 	"testing"
@@ -12,7 +13,7 @@ import (
 func TestLocalLockerCtxSingleWorker(t *testing.T) {
 	ctx := context.Background()
 	storage := NewLocalLockStorage()
-	locker := Locker{storage, "lock1", uuid.New().String(), time.Millisecond * 100}
+	locker := NewLocker(storage, "lock1", uuid.New().String(), time.Millisecond*100)
 
 	ctx10s, cancel := context.WithTimeout(ctx, time.Second*1)
 	defer cancel()
@@ -32,7 +33,7 @@ func TestLocalLockerCtxSingleWorker(t *testing.T) {
 	}
 }
 
-func TestRunInLockerThreadSingleWorker(t *testing.T) {
+func TestYdbLockerCtxSingleWorker(t *testing.T) {
 	ctx := context.Background()
 	db := ConnectToDb(t, ctx)
 	customReqBuilder := LockRequestBuilderImpl{
@@ -46,7 +47,7 @@ func TestRunInLockerThreadSingleWorker(t *testing.T) {
 		t.Errorf("create table error: %v", err)
 	}
 	storage := YdbLockStorage{db, &customReqBuilder}
-	locker := Locker{&storage, "lock1", uuid.New().String(), time.Second * 10}
+	locker := NewLocker(&storage, "lock1", uuid.New().String(), time.Second*10)
 
 	ctx10s, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
@@ -66,7 +67,7 @@ func TestRunInLockerThreadSingleWorker(t *testing.T) {
 	}
 }
 
-func TestRunInLockerThreadMultipleWorkers(t *testing.T) {
+func TestYdbLockerCtxMultipleWorkers(t *testing.T) {
 	ctx := context.Background()
 	db := ConnectToDb(t, ctx)
 	reqBuilder := GetDefaultRequestBuilder("TestRunInLockerThreadMultipleWorkers")
@@ -88,7 +89,7 @@ func TestRunInLockerThreadMultipleWorkers(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			storage := YdbLockStorage{db, reqBuilder}
-			locker := Locker{&storage, lockName, uuid.New().String(), time.Second * 10}
+			locker := NewLocker(&storage, lockName, uuid.New().String(), time.Second*10)
 			defer wg.Done()
 
 			lockCtxs := locker.LockerContext(ctx10s)
@@ -114,37 +115,40 @@ func TestRunInLockerThreadMultipleWorkers(t *testing.T) {
 	}
 }
 
-//func TestRunInLockerThreadMultipleWorkersWithTimeout(t *testing.T) {
-//	ctx := context.Background()
-//	Db := ConnectToDb(t, ctx)
-//
-//	TableName := "TestRunInLockerThreadMultipleWorkersWithTimeout"
-//	LockName := "lock2"
-//
-//	ctx10s, cancel := context.WithTimeout(ctx, time.Second*15)
-//	defer cancel()
-//
-//	cntr := 0
-//	var wg sync.WaitGroup
-//
-//	for i := 0; i < 10; i++ {
-//		OwnerName := uuid.New().String()
-//		wg.Add(1)
-//		go func(i int) {
-//			defer wg.Done()
-//			workerCtx, cancel := context.WithTimeout(ctx10s, time.Duration(i+1)*time.Second)
-//			defer cancel()
-//			//RunInLockerThread(workerCtx, Db, TableName, LockName, OwnerName, func(deadline time.Time) {
-//			//	log.Println("OwnerName: ", OwnerName, "deadline:", deadline)
-//			//	cntr++
-//			//	time.Sleep(time.Second * 1)
-//			//})
-//		}(i)
-//		time.Sleep(time.Millisecond * 100)
-//	}
-//	wg.Wait()
-//
-//	if cntr < 8 || cntr > 12 {
-//		t.Errorf("expected 10, got %d", cntr)
-//	}
-//}
+func TestYdbLockerCtxSingleWorkerLongTx(t *testing.T) {
+	ctx := context.Background()
+	db := ConnectToDb(t, ctx)
+	customReqBuilder := LockRequestBuilderImpl{
+		"TestRunInLockerThreadSingleWorker",
+		"lock_name_123",
+		"owner_456",
+		"deadline_789",
+	}
+	DropTableIfExists(t, ctx, db.Scripting(), customReqBuilder.TableName)
+	if err := CreateLocksTable(ctx, db.Scripting(), &customReqBuilder); err != nil {
+		t.Errorf("create table error: %v", err)
+	}
+	storage := YdbLockStorage{db, &customReqBuilder}
+	locker := NewLocker(&storage, "lock1", uuid.New().String(), time.Second*10)
+
+	ctx10s, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+
+	cntr := 0
+
+	for lockCtx := range locker.LockerContext(ctx10s) {
+		for lockCtx.Err() == nil {
+			locker.ExecuteUnderLock(lockCtx, func(ctx context.Context, ts table.Session, txr table.Transaction) error {
+				cntr++
+				log.Println("cntr:", cntr)
+				time.Sleep(time.Second * 1)
+				_, err := txr.CommitTx(ctx)
+				return err
+			})
+		}
+	}
+
+	if cntr < 8 || cntr > 12 {
+		t.Errorf("expected 10, got %d", cntr)
+	}
+}

@@ -67,21 +67,12 @@ func main() {
 		return
 	}
 	storage := ydb_locker.YdbLockStorage{Db: db, ReqBuilder: reqBuilder}
-	locker := ydb_locker.Locker{LockStorage: &storage, LockName: "lock1", OwnerName: "owner1", Ttl: time.Second * 10}
+	locker := ydb_locker.NewLocker(&storage, "lock1", "owner1", time.Second*10)
 
 	for lockCtx := range locker.LockerContext(ctx) {
 		for lockCtx.Err() == nil {
-			err = db.Table().Do(lockCtx, func(ctx context.Context, s table.Session) error {
-				ok, txr, err := locker.CheckLockOwner(ctx, s)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					fmt.Println("lock is not owned by", locker.OwnerName)
-					return nil
-				}
-
-				return DoSomeUserStuff(ctx, s, txr)
+			err = locker.ExecuteUnderLock(lockCtx, func(ctx context.Context, ts table.Session, txr table.Transaction) error {
+				return DoSomeUserStuff(ctx, ts, txr)
 			})
 
 			if err != nil {
