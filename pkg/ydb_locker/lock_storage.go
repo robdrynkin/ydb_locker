@@ -82,7 +82,7 @@ func (s *LocalLockStorage) TryLock(ctx context.Context, lockName string, ownerNa
 			lock.OwnerName = ownerName
 			lock.Deadline = time.Now().Add(ttl)
 		}
-		return ownerName, time.Now().Add(ttl), nil
+		return lock.OwnerName, lock.Deadline, nil
 	}
 	return "", time.Time{}, errors.New("lock not found")
 }

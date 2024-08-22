@@ -25,10 +25,6 @@ func NewLocker(lockStorage LockStorage, lockName string, ownerName string, ttl t
 	}
 }
 
-//func (l *Locker) CheckLockOwner(ctx context.Context, s table.Session) (bool, table.Transaction, error) {
-//	return l.LockStorage.CheckLockOwner(ctx, s, l.LockName, l.OwnerName)
-//}
-
 func (l *Locker) ExecuteUnderLock(ctx context.Context, f func(context.Context, table.Session, table.Transaction) error) error {
 	res := make(chan error, 1)
 	l.FuncsToRun <- func() {

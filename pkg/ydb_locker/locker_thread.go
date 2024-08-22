@@ -45,6 +45,12 @@ func LockerThread(ctx context.Context, deadlineNano *atomic.Int64, lockStorage L
 			fn()
 
 		case <-ctx.Done():
+			_, _, err := lockStorage.TryLock(ctx, lockName, ownerName, 0)
+			if err != nil {
+				log.Println(err)
+			} else {
+				log.Println("lock released")
+			}
 			return
 		}
 	}

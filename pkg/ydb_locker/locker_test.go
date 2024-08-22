@@ -15,18 +15,54 @@ func TestLocalLockerCtxSingleWorker(t *testing.T) {
 	storage := NewLocalLockStorage()
 	locker := NewLocker(storage, "lock1", uuid.New().String(), time.Millisecond*100)
 
-	ctx10s, cancel := context.WithTimeout(ctx, time.Second*1)
+	ctx1s, cancel := context.WithTimeout(ctx, time.Second*1)
 	defer cancel()
 
 	cntr := 0
 
-	for lockCtx := range locker.LockerContext(ctx10s) {
+	for lockCtx := range locker.LockerContext(ctx1s) {
 		for lockCtx.Err() == nil {
 			cntr++
 			log.Println("cntr:", cntr)
 			time.Sleep(time.Millisecond * 100)
 		}
 	}
+
+	if cntr < 8 || cntr > 12 {
+		t.Errorf("expected 10, got %d", cntr)
+	}
+}
+
+func TestLocalLockerCtxMultipleWorkersGracefulStop(t *testing.T) {
+	ctx := context.Background()
+	storage := NewLocalLockStorage()
+
+	ctx1s, cancel := context.WithTimeout(ctx, time.Second*1)
+	defer cancel()
+
+	cntr := 0
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			c, cancel := context.WithTimeout(ctx1s, time.Millisecond*100*time.Duration(i))
+			defer cancel()
+
+			locker := NewLocker(storage, "lock1", uuid.New().String(), time.Millisecond*100)
+
+			for lockCtx := range locker.LockerContext(c) {
+				for lockCtx.Err() == nil {
+					cntr++
+					log.Println("cntr:", cntr)
+					time.Sleep(time.Millisecond * 100)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
 
 	if cntr < 8 || cntr > 12 {
 		t.Errorf("expected 10, got %d", cntr)
