@@ -10,6 +10,8 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/named"
 	"log"
+	"os"
+	"os/signal"
 	"time"
 )
 
@@ -42,6 +44,23 @@ func DoSomeUserStuff(ctx context.Context, s table.Session, txr table.Transaction
 	return nil
 }
 
+func handleSignals(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		select {
+		case <-c:
+			cancel()
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(c)
+		cancel()
+	}
+
+}
+
 func main() {
 	var endpoint string
 	var database string
@@ -53,6 +72,8 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+	ctx, cancel := handleSignals(ctx)
+	defer cancel()
 
 	log.Printf("connecting -> endpoint: %s, database: %s", endpoint, database)
 	db, err := ydb.Open(ctx, sugar.DSN(endpoint, database, false))
