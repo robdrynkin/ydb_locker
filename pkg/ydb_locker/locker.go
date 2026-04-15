@@ -30,7 +30,13 @@ func (l *Locker) ExecuteUnderLock(ctx context.Context, f func(context.Context, t
 	l.FuncsToRun <- func() {
 		res <- l.LockStorage.ExecuteUnderLock(ctx, l.LockName, l.OwnerName, f)
 	}
-	return <-res
+
+	select {
+	case err := <-res:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (l *Locker) LockerContext(ctx context.Context) chan context.Context {
